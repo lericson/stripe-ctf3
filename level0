@@ -1,19 +1,24 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env python
 
-# Our test cases will always use the same dictionary file (with SHA1
-# 6b898d7c48630be05b72b3ae07c5be6617f90d8e). Running `test/harness`
-# will automatically download this dictionary for you if you don't
-# have it already.
+import sys
+import re
 
-path = ARGV.length > 0 ? ARGV[0] : '/usr/share/dict/words'
-entries = File.read(path).split("\n")
+word_re_sub = re.compile(r'[^ \n]+').sub
 
-contents = $stdin.read
-output = contents.gsub(/[^ \n]+/) do |word|
-  if entries.include?(word.downcase)
-    word
-  else
-    "<#{word}>"
-  end
-end
-print output
+def words_path(path):
+    with open(path) as fp:
+        return set(fp.read().split('\n'))
+
+def main(args=sys.argv[1:]):
+    words = words_path(args[0] if args else '/usr/share/dict/words')
+
+    def replace(match):
+        word = match.group(0)
+        if word.lower() not in words:
+            return '<' + word + '>'
+        return word
+
+    sys.stdout.write(word_re_sub(replace, sys.stdin.read()))
+
+if __name__ == "__main__":
+    main()
