@@ -36,15 +36,12 @@ def words_path(path):
 
 def main(args=sys.argv[1:]):
     words = words_path(args[0] if args else '/usr/share/dict/words')
-    word_filter = bloom(8, 1)
-    word_filter.update(words)
 
     def replace(match):
         word = match.group(0)
         word_lower = word.lower()
-        if word_lower in word_filter:
-            if word_lower in words:
-                return word
+        if word_lower in words:
+            return word
         return '<' + word + '>'
 
     sys.stdout.write(word_re_sub(replace, sys.stdin.read()))
