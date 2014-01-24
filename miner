@@ -1,98 +1,122 @@
-#!/bin/bash
+#!/usr/bin/env python
+"Maj -- gitcoin miner"
 
-set -eu
+from __future__ import unicode_literals, print_function
 
-if [ "$#" != 2 ]; then
-    echo >&2 "Usage: $0 <clone_url> <public_username>
+import sys
+import string
+import hashlib
+import multiprocessing
 
-A VERY SLOW mining implementation. This should give you an idea of
-where to start, but it probably won't successfully mine you any
-Gitcoins.
+winner_commit_queue = multiprocessing.Queue()
+hash_rate_queue = multiprocessing.Queue()
+reload_condition = multiprocessing.Condition()
 
-Arguments:
+author = committer = b'A <b> 1390552808 +0100'
+message  = b'Gitcoi\n'
+nonce_length = 16
+num_processes = 1*multiprocessing.cpu_count()
+difficulty = open('difficulty.txt').read().strip()
 
-<clone_url> is the string you'd pass to git clone (i.e.
-  something of the form username@hostname:path)
+h = hashlib.sha1()
 
-<public_username> is the public username provided to you in
-  the CTF web interface."
-    exit 1
-fi
+def commit(tree, parent, author, committer, message):
+    return b'\n'.join(
+        (b'tree ' + tree,
+         b'parent ' + parent,
+         b'author ' + author,
+         b'committer ' + committer,
+         b'',
+         message))
 
-export clone_spec=$1
-export public_username=$2
+def nonce_gen(c, n=16):
+    if n != 16:
+        0/0
+    p = b'Nonce' + c + b' '
+    alphabet = string.printable
+    for i0 in alphabet:
+        for i1 in alphabet:
+            for i2 in alphabet:
+                for i3 in alphabet:
+                    for i4 in alphabet:
+                        for i5 in alphabet:
+                            for i6 in alphabet:
+                                for i7 in alphabet:
+                                    yield p+i0+i1+i2+i3+i4+i5+i6+i7+'\n'
 
-prepare_index() {
-    perl -i -pe 's/($ENV{public_username}: )(\d+)/$1 . ($2+1)/e' LEDGER.txt
-    grep -q "$public_username" LEDGER.txt || echo "$public_username: 1" >> LEDGER.txt
+def power_on_self_test():
+    commit_obj = commit('352ecf915f1dbb28ae13ff6eb72c971f3a96dc78',
+                        '000000c47a7ab30b4f6620f7936fb3770ea5506b',
+                        'Stripe CTF <ctf@stripe.com> 1390551315 +0000',
+                        'Stripe CTF <ctf@stripe.com> 1390551315 +0000',
+                        'Mined a Gitcoin!\nnonce 010e1219')
+    h = hashlib.sha1('commit %d\0%s' % (len(commit_obj), commit_obj))
+    if '00000014c69d468efd589473b90b8049b12d3bda' != h.hexdigest():
+        0/0
 
-    git add LEDGER.txt
-}
+def update_git():
+    # git fetch origin
+    # parent = git rev-parse origin/master
+    __import__('time').sleep(3.0)
 
-solve() {
-    # Brute force until you find something that's lexicographically
-    # small than $difficulty.
-    difficulty=$(cat difficulty.txt)
+def main(args=sys.argv[1:]):
+    power_on_self_test()
+    parent, tree = args
 
-    # Create a Git tree object reflecting our current working
-    # directory
-    tree=$(git write-tree)
-    parent=$(git rev-parse HEAD)
-    timestamp=$(date +%s)
+    commit_obj = commit(tree, parent, author, committer, message)
 
-    counter=0
+    # pad
+    #minlen = len(commit_obj)
+    #commit_obj += b'HAX ' * 32
+    #commit_obj  = commit_obj[:((minlen // h.block_size) + 1) * h.block_size]
+    #commit_obj  = commit_obj[:-2] + '\n\n'
+    #if (len(commit_obj) % h.block_size) != 0:
+    #    0/0
 
-    while let counter=counter+1; do
-	echo -n .
+    ps = []
+    for i in xrange(num_processes):
+        p = multiprocessing.Process(target=worker, args=(i, commit_obj))
+        p.start()
+        ps.append(p)
+    while True:
+        while not hash_rate_queue.empty():
+            (i, n, t) = hash_rate_queue.get()
+            print('Rate worker', i, 'is', n/1e3/t, 'kH/s', file=sys.stderr)
+        if not winner_commit_queue.empty():
+            winner = winner_commit_queue.get()
+            print(winner, end="")
+            for p in ps:
+                p.terminate()
+            break
+        update_git()
 
-	body="tree $tree
-parent $parent
-author CTF user <me@example.com> $timestamp +0000
-committer CTF user <me@example.com> $timestamp +0000
+def worker(i, commit_obj):
+    next_nonce = nonce_gen(str(i), nonce_length).next
+    if len(next_nonce()) != nonce_length:
+        0/0
 
-Give me a Gitcoin
+    print('Starting worker', i, file=sys.stderr)
+    h.update(b'commit %d\0%s' % (len(commit_obj) + nonce_length, commit_obj))
+    #print('Length:', len(b'commit %d\0%s' % (len(commit_obj) + nonce_length, commit_obj + next_nonce())))
+    copy_h = h.copy
+    update = type(h).update
+    hexdigest = type(h).hexdigest
+    commit_id = '\xff'
+    import time
+    t0 = time.time()
+    n = 0
+    #n_calc = 0xfffff
+    while commit_id >= difficulty:
+        h_ = copy_h()
+        nonce = next_nonce()
+        update(h_, nonce)
+        commit_id = hexdigest(h_)
+        #n += 1
+        #if (n & n_calc) == n_calc:
+        if commit_id < difficulty:
+            t = time.time() - t0
+            hash_rate_queue.put((i, n, t))
+            winner_commit_queue.put(commit_obj + nonce)
 
-$counter"
-
-	# See http://git-scm.com/book/en/Git-Internals-Git-Objects for
-	# details on Git objects.
-	sha1=$(git hash-object -t commit --stdin <<< "$body")
-
-	if [ "$sha1" "<" "$difficulty" ]; then
-	    echo
-	    echo "Mined a Gitcoin with commit: $sha1"
-	    git hash-object -t commit --stdin -w <<< "$body"  > /dev/null
-	    git reset --hard "$sha1" > /dev/null
-	    break
-	fi
-    done
-}
-
-reset() {
-    git fetch origin master >/dev/null 2>/dev/null
-    git reset --hard origin/master >/dev/null
-}
-
-# Set up repo
-local_path=./${clone_spec##*:}
-
-if [ -d "$local_path" ]; then
-    echo "Using existing repository at $local_path"
-    cd "$local_path"
-else
-    echo "Cloning repository to $local_path"
-    git clone "$clone_spec" "$local_path"
-    cd "$local_path"
-fi
-
-while true; do
-    prepare_index
-    solve
-    if git push origin master; then
-	echo "Success :)"
-	break
-    else
-	echo "Starting over :("
-	reset
-    fi
-done
+if __name__ == "__main__":
+    main()
