@@ -8,6 +8,12 @@ var checkServer = require('./network_simulation/lib/check_server');
 var nopt = require('nopt');
 var url = require('url');
 
+/* Token bucket filtering */
+
+var nReqs = 0;
+var tokenBucketConfig = {rate: 1, max: 5};
+var tokenBucket = {};
+
 var RequestData = function (request, response, buffer) {
   this.request = request;
   this.response = response;
@@ -19,7 +25,7 @@ function ipFromRequest(reqData) {
 }
 
 function rejectRequest(reqData) {
-  reqData.response.writeHead(400);
+  //reqData.response.writeHead(400);
   reqData.response.end();
 }
 
@@ -28,15 +34,39 @@ var Queue = function (proxies, parameters) {
   this.parameters = parameters;
 };
 Queue.prototype.takeRequest = function (reqData) {
-  // Reject traffic as necessary:
-  // if (currently_blacklisted(ipFromRequest(reqData))) {
-  //   rejectRequest(reqData);
-  //   return;
-  // }
-  // Otherwise proxy it through:
-  this.proxies[0].proxyRequest(reqData.request, reqData.response, reqData.buffer);
+  var src = ipFromRequest(reqData);
+  var bucket = tokenBucket[src];
+  var tCurr = new Date();
+
+  if (bucket === undefined) {
+    bucket = tokenBucket[src] = {};
+    bucket.tPrev = bucket.tStart = tCurr;
+    bucket.nTokens = tokenBucketConfig.max;
+    bucket.nReqs = 0;
+  } else {
+    var t  = (tCurr - bucket.tPrev) / 1e3;
+    var nTokens  = t*tokenBucketConfig.rate;
+    if (nTokens >= 1) {
+      bucket.nTokens = Math.max(bucket.nTokens + nTokens, tokenBucketConfig.max);
+      bucket.tPrev = tCurr;
+    }
+  }
+
+  /*if (++bucket.nReqs > 1) {
+    var reqRate = bucket.nReqs / (tCurr - bucket.tStart);
+  }*/
+
+  if (--bucket.n <= 0) {
+    bucket.n = 0;
+    rejectRequest(reqData);
+    return;
+  }
+
+  var proxy = this.proxies[(nReqs++) % this.proxies.length];
+  proxy.proxyRequest(reqData.request, reqData.response, reqData.buffer);
 };
 Queue.prototype.requestFinished = function () {
+  checkForNew();
   return;
 };
 
