@@ -11,8 +11,10 @@ var url = require('url');
 /* Token bucket filtering */
 
 var nReqs = 0;
-var tokenBucketConfig = {rate: 1, max: 5};
+var tokenBucketConfig = {rate: null, max: 10};
 var tokenBucket = {};
+var outstanding = 0;
+var proxyRate = 0;
 
 var RequestData = function (request, response, buffer) {
   this.request = request;
@@ -25,7 +27,7 @@ function ipFromRequest(reqData) {
 }
 
 function rejectRequest(reqData) {
-  //reqData.response.writeHead(400);
+  reqData.response.writeHead(400);
   reqData.response.end();
 }
 
@@ -43,31 +45,72 @@ Queue.prototype.takeRequest = function (reqData) {
     bucket.tPrev = bucket.tStart = tCurr;
     bucket.nTokens = tokenBucketConfig.max;
     bucket.nReqs = 0;
+    bucket.outstanding = 0;
+    bucket.nRejected = 0;
   } else {
     var t  = (tCurr - bucket.tPrev) / 1e3;
-    var nTokens  = t*tokenBucketConfig.rate;
-    if (nTokens >= 1) {
-      bucket.nTokens = Math.max(bucket.nTokens + nTokens, tokenBucketConfig.max);
-      bucket.tPrev = tCurr;
-    }
+    bucket.nTokens = Math.min(bucket.nTokens + t*proxyRate*0.8,
+                              tokenBucketConfig.max);
+    bucket.tPrev = tCurr;
   }
 
-  /*if (++bucket.nReqs > 1) {
-    var reqRate = bucket.nReqs / (tCurr - bucket.tStart);
-  }*/
+  if (bucket.blacklisted) {
+    return;
+  }
 
-  if (--bucket.n <= 0) {
-    bucket.n = 0;
+  bucket.nReqs++;
+  bucket.nTokens = Math.max(--bucket.nTokens, 0);
+
+  //console.log('request from', src, proxyRate);
+
+  if (outstanding >= 3) {
+    if (bucket.nRejected >= 3) {
+      outstanding--;
+      bucket.outstanding--;
+      //console.log('drop request from asshole', src);
+      return;
+    }
+
+    if ((bucket.outstanding / outstanding) >= 0.8) {
+      outstanding--;
+      bucket.outstanding--;
+      bucket.nRejected++;
+      //console.log('rejected due to concurrency', src);
+      rejectRequest(reqData);
+      return;
+    }
+
+  }
+
+  if (bucket.nTokens <= 0) {
+    bucket.nTokens = 0;
+    outstanding--;
+    bucket.outstanding--;
+    bucket.nRejected++;
+    //console.log('rejected due to rate', src);
     rejectRequest(reqData);
     return;
   }
 
   var proxy = this.proxies[(nReqs++) % this.proxies.length];
+  reqData.request.bucket = bucket;
+  reqData.request.proxied = new Date();
   proxy.proxyRequest(reqData.request, reqData.response, reqData.buffer);
 };
-Queue.prototype.requestFinished = function () {
-  checkForNew();
-  return;
+Queue.prototype.requestStarted = function (req, res) {
+  var bucket = req.bucket;
+  outstanding++;
+  this.outstanding++;
+  bucket.outstanding++;
+};
+Queue.prototype.requestFinished = function (req, res, response) {
+  var bucket = req.bucket;
+  delete req.bucket;
+  bucket.outstanding--;
+  this.outstanding--;
+  outstanding--;
+  var instantRate = 1/(((new Date()) - req.proxied)/1e3);
+  proxyRate = (proxyRate + instantRate)/2;
 };
 
 function checkBackends(targets, path, response) {
@@ -107,6 +150,7 @@ function main() {
     target = {'host': 'localhost', 'port': outPorts[i]};
     targets.push(target);
     proxy = new httpProxy.HttpProxy({'target': target});
+    proxy.outstanding = 0;
     proxy.identifier = i;
     proxies.push(proxy);
   }
@@ -114,6 +158,7 @@ function main() {
   var queue = new Queue(proxies, {});
   for (i = 0; i < proxies.length; i++) {
     proxy = proxies[i];
+    proxy.on("start", queue.requestStarted);
     proxy.on("end", queue.requestFinished);
   }
 
