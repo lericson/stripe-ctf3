@@ -27,10 +27,6 @@ class Runner(test_framework.AbstractRunner):
     def hook_prerun(self):
         self.run_build_sh()
 
-    # Scala compiles are slow; just let start-servers use SBT.
-    def run_build_sh(self):
-        pass
-
     def cleanup(self):
         util.logger.info('Cleaning up children')
         for popen in self.child_popens:
@@ -53,7 +49,7 @@ class Runner(test_framework.AbstractRunner):
         return self.client.request('GET', self.uri('/index?path=%s' % path))
 
     def start_servers(self):
-        p = subprocess.Popen(['bin/start-servers'],
+        p = subprocess.Popen(['bin/local-start-servers'],
                              preexec_fn=lambda: os.setpgid(0, 0),
                              stdout=sys.stdout,
                              stderr=sys.stderr)
@@ -65,12 +61,14 @@ class Runner(test_framework.AbstractRunner):
 
         while True:
             try:
-                if attempts > max_attempts:
-                    raise error.StripeError("Unable to start server up")
-
                 body, code = self.client.request('GET', path)
                 if (code == 200) and ("true" in body):
                     return
+                if attempts > max_attempts:
+                    raise error.StripeError(
+                        "The master search server does not seem to be responding " +
+                        "to /healthcheck. Try running bin/local-start-servers " +
+                        "manually to make sure that the servers start up correctly.")
             except error.HTTPConnectionError as e:
                 pass
 

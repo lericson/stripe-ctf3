@@ -150,7 +150,7 @@ class AbstractRunner(object):
 
     # may override
     def code_directory(self):
-        return os.path.join(os.path.dirname(__file__), "..")
+        return os.path.join(os.path.dirname(__file__), "..", "..")
 
     def log_diff(self, benchmark_output, user_output):
         util.logger.info("Here is the head of your output:")
@@ -163,7 +163,7 @@ class AbstractRunner(object):
         util.logger.info("".join(lines))
 
     def run_build_sh(self):
-        util.logger.info("Building your code via `build.sh`.")
+        util.logger.info("Building your code via `build.sh`: this might take a while...")
         build_runner = subprocess.Popen([
             os.path.join(self.code_directory(), "build.sh")],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
