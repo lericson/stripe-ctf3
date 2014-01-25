@@ -19,7 +19,7 @@ run() {
 cleanup() {
   for pid in "${pids[@]}"; do
     echo "$0: killing child $pid"
-    kill "$pid"
+    kill -INT "$pid"
   done
 }
 
