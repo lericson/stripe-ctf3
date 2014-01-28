@@ -33,7 +33,7 @@ class Runner(test_framework.AbstractRunner):
         util.logger.info("Beginning run.")
         try:
             # TODO: handle non-zero return codes here better
-            octopus = subprocess.Popen(["./octopus", "--seed", str(input), "-w", self.results_path, "-duration", str(self.DURATION)], cwd=os.path.dirname(__file__))
+            octopus = subprocess.Popen(["./octopus", "--seed", str(input), "-w", self.results_path, "-duration", str(self.DURATION), '--', '-v'], cwd=os.path.dirname(__file__))
         except OSError as e:
             raise Exception("Experienced an error trying to run Octopus: %s. (Hint: try removing `test/data/octopus.version` and running the harness again.)" % (e, ))
 

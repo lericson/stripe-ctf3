@@ -121,4 +121,6 @@ OPTIONS:
 	sigchan := make(chan os.Signal)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigchan
+
+	log.Printf("Bye!")
 }

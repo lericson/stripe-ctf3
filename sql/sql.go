@@ -1,91 +1,139 @@
 package sql
 
 import (
+	"fmt"
 	"bytes"
-	"os/exec"
 	"strings"
+	"database/sql"
 	"stripe-ctf.com/sqlcluster/log"
+	_ "github.com/mattn/go-sqlite3"
 	"sync"
-	"syscall"
 )
 
 type SQL struct {
 	path           string
+	db             *sql.DB
+	tx             *sql.Tx
 	sequenceNumber int
 	mutex          sync.Mutex
 }
 
-type Output struct {
-	Stdout         []byte
-	Stderr         []byte
-	SequenceNumber int
-}
+func NewSQL(path string) (*SQL, error) {
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		return nil, err
+	}
 
-func NewSQL(path string) *SQL {
-	sql := &SQL{
+	s := &SQL{
 		path: path,
+		db:   db,
 	}
-	return sql
+
+	return s, nil
 }
 
-func getExitstatus(err error) int {
-	exiterr, ok := err.(*exec.ExitError)
-	if !ok {
-		return -1
-	}
-
-	status, ok := exiterr.Sys().(syscall.WaitStatus)
-	if !ok {
-		return -1
-	}
-
-	return status.ExitStatus()
-}
-
-func (sql *SQL) Execute(tag string, command string) (*Output, error) {
-	// TODO: make sure I can catch non-lock issuez
-	sql.mutex.Lock()
-	defer sql.mutex.Unlock()
-
-	defer func() { sql.sequenceNumber += 1 }()
-	if tag == "primary" || log.Verbose() {
-		log.Printf("[%s] [%d] Executing %#v", tag, sql.sequenceNumber, command)
-	}
-
-	subprocess := exec.Command("sqlite3", sql.path)
-	subprocess.Stdin = strings.NewReader(command + ";")
-
-	var stdout, stderr bytes.Buffer
-	subprocess.Stdout = &stdout
-	subprocess.Stderr = &stderr
-
-	if err := subprocess.Start(); err != nil {
-		log.Panic(err)
-	}
-
-	var o, e []byte
-
-	if err := subprocess.Wait(); err != nil {
-		exitstatus := getExitstatus(err)
-		switch true {
-		case exitstatus < 0:
-			log.Panic(err)
-		case exitstatus == 1:
-			fallthrough
-		case exitstatus == 2:
-			o = stderr.Bytes()
-			e = nil
+func (s *SQL) executeQueries(queries string) (*bytes.Buffer, *bytes.Buffer) {
+	var errorLine, prevErrorLine string
+    stdout := new(bytes.Buffer)
+    stderr := new(bytes.Buffer)
+    lineNo := 1
+	for _, q := range strings.Split(queries, ";") {
+		for i := 0; i < len(q) && q[i] == '\n'; i++ {
+			lineNo += 1
 		}
-	} else {
-		o = stdout.Bytes()
-		e = stderr.Bytes()
+		currentLineNo := lineNo
+		q = strings.TrimLeft(q, "\r\n\t ")
+		lineNo += strings.Count(q, "\n")
+		q = strings.TrimRight(q, "\r\n\t ")
+		if len(q) == 0 {
+			continue
+		}
+
+		// 2014/01/29 14:27:24 [node3] 2014/01/29 14:27:24 [follower] Forwarding query: "UPDATE ctf3 SET friendCount=friendCount+84, requestCount=requestCount+1, favoriteWord=\"cqhfdgccagqhphj\" WHERE name=\"carl\"; SELECT * FROM ctf3;"
+		// 2014/01/29 14:27:25 [node0] 2014/01/29 14:27:25 [leader] Executing query: "UPDATE ctf3 SET friendCount=friendCount+84, requestCount=requestCount+1, favoriteWord=\"cqhfdgccagqhphj\" WHERE name=\"carl\"; SELECT * FROM ctf3;"
+		// 2014/01/29 14:27:25 [node0] 2014/01/29 14:27:25 [32] Query: UPDATE ctf3 SET friendCount=friendCount+84, requestCount=requestCount+1, favoriteWord="cqhfdgccagqhphj" WHERE name="carl"
+		// 2014/01/29 14:27:25 [node0] 2014/01/29 14:27:25 Executed, affected rows: 1, last insert ID: 5
+		// 2014/01/29 14:27:25 [node0] 2014/01/29 14:27:25 [32] Query: SELECT * FROM ctf3
+
+		log.Debugf("[%d] Query: %s", s.sequenceNumber, q)
+
+		if (!strings.HasPrefix(q, "SELECT ")) {
+			res, err := s.db.Exec(q)
+			if err != nil {
+				log.Printf("Error excuting query: %s", err.Error())
+				errorLine = fmt.Sprintf("Error: near line %d: %s\n",
+					                    currentLineNo, err.Error())
+				if (errorLine != prevErrorLine) {
+					stderr.WriteString(errorLine)
+				}
+				continue
+			}
+			rowsAffected, _ := res.RowsAffected()
+			lastInsertId, _ := res.LastInsertId()
+			log.Debugf("Executed, affected rows: %d, last insert ID: %d",
+				       rowsAffected, lastInsertId)
+			continue
+		}
+
+		rows, err := s.db.Query(q)
+		if err != nil {
+			log.Printf("Error excuting query: %s", err.Error())
+			errorLine = fmt.Sprintf("Error: near line %d: %s\n",
+				                    currentLineNo, err.Error())
+			if (errorLine != prevErrorLine) {
+				stderr.WriteString(errorLine)
+			}
+			continue
+		}
+
+		cols, err := rows.Columns()
+		if err != nil {
+			panic(err)
+		}
+
+		if len(cols) == 0 {
+			rows.Close()
+			continue
+		}
+
+	    readCols := make([]interface{}, len(cols))
+	    writeCols := make([]string, len(cols))
+	    for i, _ := range writeCols {
+	        readCols[i] = &writeCols[i]
+	    }
+
+		for rows.Next() {
+	        if err := rows.Scan(readCols...); err != nil {
+	            panic(err)
+	        }
+	        stdout.WriteString(strings.Join(writeCols, "|"))
+			stdout.WriteByte(0x0a)
+		}
+		rows.Close()
 	}
 
-	output := &Output{
-		Stdout:         o,
-		Stderr:         e,
-		SequenceNumber: sql.sequenceNumber,
-	}
+	return stdout, stderr
+}
 
-	return output, nil
+func (s *SQL) Begin() error {
+	s.mutex.Lock()
+	tx, err := s.db.Begin()
+	s.tx = tx
+	return err
+}
+
+func (s *SQL) Commit() error {
+	err := s.tx.Commit()
+	s.tx = nil
+	s.sequenceNumber += 1
+	s.mutex.Unlock()
+	return err
+}
+
+func (s *SQL) Execute(queries string) ([]byte, error) {
+	stdout, stderr := s.executeQueries(queries)
+
+	formatted := fmt.Sprintf("SequenceNumber: %d\n%s%s",
+		s.sequenceNumber, stdout.String(), stderr.String())
+	return []byte(formatted), nil
 }

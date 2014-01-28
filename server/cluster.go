@@ -17,7 +17,7 @@ func (sa ServerAddress) String() string {
 
 type Cluster struct {
 	self    ServerAddress
-	primary ServerAddress
+	leader  ServerAddress
 	members []ServerAddress
 }
 
@@ -31,21 +31,21 @@ func NewCluster(name, connectionString string) *Cluster {
 }
 
 func (c *Cluster) Init() {
-	log.Printf("Initializing cluster and promoting self to primary")
-	c.primary = c.self
+	log.Printf("Initializing cluster and promoting self to leader")
+	c.leader = c.self
 	c.members = make([]ServerAddress, 0)
 }
 
-func (c *Cluster) Join(primary ServerAddress, members []ServerAddress) {
-	log.Printf("Joining existing cluster: primary %v, members %v", primary, members)
-	c.primary = primary
+func (c *Cluster) Join(leader ServerAddress, members []ServerAddress) {
+	log.Printf("Joining existing cluster: leader %v, members %v", leader, members)
+	c.leader = leader
 	c.members = members
 }
 
 func (c *Cluster) AddMember(identity ServerAddress) error {
 	state := c.State()
-	if state != "primary" {
-		return errors.New("Can only join to a primary, but you're talking to a " + state)
+	if state != "leader" {
+		return errors.New("Can only join to a leader, but you're talking to a " + state)
 	}
 
 	log.Printf("Adding new cluster member %v", identity)
@@ -56,27 +56,17 @@ func (c *Cluster) AddMember(identity ServerAddress) error {
 
 func (c *Cluster) State() string {
 	switch true {
-	case c.members == nil:
-		return "startup"
-	case c.self.Name == c.primary.Name:
-		return "primary"
+	case c.leader.Name == c.self.Name:
+		return "leader"
+	case c.leader.Name == "":
+		return "candidate"
 	default:
-		return "secondary"
+		return "follower"
 	}
 }
 
-func (c *Cluster) PerformFailover() {
-	state := c.State()
-	if state != "secondary" {
-		log.Fatalf("Trying to fail over even though my state is %s", state)
-	}
-
-	c.primary = c.members[0]
-	c.members = c.members[1:]
-
-	if c.State() == "primary" {
-		log.Printf("I am the the primary now.")
-	} else {
-		log.Printf("Promoted %s to primary. My time will come one day.", c.primary.Name)
-	}
+func (c *Cluster) LeaderDead() {
+	log.Printf("The leader is dead. Long live the leader!")
+	c.leader.Name = ""
+	c.leader.ConnectionString = ""
 }
