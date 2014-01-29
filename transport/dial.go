@@ -3,6 +3,7 @@ package transport
 import (
 	"errors"
 	"net"
+	"time"
 	"regexp"
 	"strings"
 )
@@ -11,7 +12,7 @@ var unix *regexp.Regexp = regexp.MustCompile("^[/a-zA-Z0-9\\.]*$")
 
 func UnixDialer(_, encoded string) (net.Conn, error) {
 	decoded := Decode(encoded)
-	return net.Dial(Network(decoded), decoded)
+	return net.DialTimeout(Network(decoded), decoded, time.Duration(500 * time.Millisecond))
 }
 
 func Network(addr string) string {

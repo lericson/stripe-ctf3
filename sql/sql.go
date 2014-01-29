@@ -10,23 +10,30 @@ import (
 	"sync"
 )
 
+type Result struct {
+	Output []byte
+	Error  error
+}
+
 type SQL struct {
 	path           string
 	db             *sql.DB
 	tx             *sql.Tx
 	sequenceNumber int
 	mutex          sync.Mutex
+	ResultChannels  map[string]chan Result
 }
 
-func NewSQL(path string) (*SQL, error) {
+func New(path string) (*SQL, error) {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &SQL{
-		path: path,
-		db:   db,
+		db:      db,
+		path:    path,
+		ResultChannels: make(map[string]chan Result),
 	}
 
 	return s, nil
@@ -65,6 +72,7 @@ func (s *SQL) executeQueries(queries string) (*bytes.Buffer, *bytes.Buffer) {
 					                    currentLineNo, err.Error())
 				if (errorLine != prevErrorLine) {
 					stderr.WriteString(errorLine)
+					prevErrorLine = errorLine
 				}
 				continue
 			}
@@ -82,6 +90,7 @@ func (s *SQL) executeQueries(queries string) (*bytes.Buffer, *bytes.Buffer) {
 				                    currentLineNo, err.Error())
 			if (errorLine != prevErrorLine) {
 				stderr.WriteString(errorLine)
+				prevErrorLine = errorLine
 			}
 			continue
 		}
@@ -126,6 +135,13 @@ func (s *SQL) Commit() error {
 	err := s.tx.Commit()
 	s.tx = nil
 	s.sequenceNumber += 1
+	s.mutex.Unlock()
+	return err
+}
+
+func (s *SQL) Rollback() error {
+	err := s.tx.Rollback()
+	s.tx = nil
 	s.mutex.Unlock()
 	return err
 }
