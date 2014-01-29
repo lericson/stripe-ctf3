@@ -193,14 +193,21 @@ func (s *Server) sqlHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	query = string(b)
+	rand.Seed(time.Now().UnixNano())
 
 	switch req.URL.RawQuery {
 	case "":
-		txId = fmt.Sprintf("%04x", time.Now().UnixNano() & 0xffff)
+		txId = fmt.Sprintf("%08x", time.Now().UnixNano() & 0xffffffff)
 		break
 	default:
 		txId = req.URL.RawQuery
 		break
+	}
+
+	if cachedResp := s.sql.QueryCache[txId]; cachedResp != nil {
+		log.Printf("%s returning cached query", txId)
+		w.Write(cachedResp)
+		return
 	}
 
 	for state := s.raftServer.State(); !((state == raft.Follower) || (state == raft.Leader)); {
@@ -291,7 +298,7 @@ postLoop:
 				break postLoop
 			case <-errCh:
 				log.Printf("%s Error in proxy attempt, retrying", txId)
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(250 * time.Millisecond)
 				continue postLoop
 			/*case <-time.After(2*time.Second):
 				log.Printf("No SequenceNumber in attempt %04x#%d, retrying", t, i)
