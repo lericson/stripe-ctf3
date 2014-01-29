@@ -13,7 +13,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -51,15 +50,7 @@ func New(path string, listen string) (*Server, error) {
 		leaderCh: make(chan string),
 	}
 
-	// Read existing name or generate a new one.
-	if b, err := ioutil.ReadFile(filepath.Join(path, "name")); err == nil {
-		s.name = string(b)
-	} else {
-		s.name = fmt.Sprintf("%07x", rand.Int())[0:7]
-		if err = ioutil.WriteFile(filepath.Join(path, "name"), []byte(s.name), 0644); err != nil {
-			panic(err)
-		}
-	}
+	s.name = listen
 
 	return s, nil
 }
@@ -285,12 +276,12 @@ postLoop:
 					Error:  nil,
 				}
 			}()
-			log.Printf("marikan Waiting for results on %s", txId)
+			//log.Printf("marikan Waiting for results on %s", txId)
 			select {
 			case result := <-ch:
 				resp = result.Output
 				err = result.Error
-				log.Printf("marikan Before break proxy response: %s", string(resp))
+				//log.Printf("marikan Before break proxy response: %s", string(resp))
 				break postLoop
 			case <-errCh:
 				log.Printf("%s Error in proxy attempt, retrying", txId)
@@ -301,7 +292,7 @@ postLoop:
 				continue postLoop*/
 			}
 		}
-		log.Printf("Follower proxy response: %s", string(resp))
+		//log.Printf("Follower proxy response: %s", string(resp))
 		w.Write(resp)
 		return
 	} else {
@@ -315,7 +306,7 @@ postLoop:
 			log.Printf("Rafting error: %s", err)
 		}
 		log.Debugf("Rafting done, returning HTTP response")
-		log.Printf("%s Leader response: %s", txId, string(resp))
+		//log.Printf("%s Leader response: %s", txId, string(resp))
 	}
 
 	if err != nil {
