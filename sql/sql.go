@@ -22,6 +22,7 @@ type SQL struct {
 	sequenceNumber int
 	mutex          sync.Mutex
 	ResultChannels  map[string]chan Result
+	QueryCache      map[string][]byte
 }
 
 func New(path string) (*SQL, error) {
@@ -34,6 +35,7 @@ func New(path string) (*SQL, error) {
 		db:      db,
 		path:    path,
 		ResultChannels: make(map[string]chan Result),
+		QueryCache:     make(map[string][]byte),
 	}
 
 	return s, nil

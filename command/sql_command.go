@@ -28,9 +28,17 @@ func (c *SQLCommand) CommandName() string {
 // Applies a SQL query.
 func (c *SQLCommand) Apply(server raft.Server) (interface{}, error) {
 	sqlDb := server.Context().(*sql.SQL)
+	var out []byte
+
+	if out = sqlDb.QueryCache[c.TxId]; out != nil {
+		log.Printf("marikan Return cached SQL %s: %s", c.TxId, out)
+		return out, nil
+	}
+
 	sqlDb.Begin()
-	defer sqlDb.Commit()
 	out, err := sqlDb.Execute(c.Query)
+	sqlDb.Commit()
+	sqlDb.QueryCache[c.TxId] = out
 	log.Printf("marikan Applied SQL %s: %s", c.TxId, out)
 	if err != nil {
 		log.Printf("Error applying SQL!")

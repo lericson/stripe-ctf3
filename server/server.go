@@ -263,14 +263,12 @@ postLoop:
 					// When an error occurs we signal that error later so that
 					// if it got through, it'll maybe get back to us.
 					log.Printf("Failed sending proxy request: %s", err)
-					time.Sleep(650 * time.Millisecond)
 					errCh <-1
 					return
 				}
 				body, err = ioutil.ReadAll(resp)
 				if err != nil {
 					log.Printf("Failed reading proxy response: %s", err)
-					time.Sleep(650 * time.Millisecond)
 					errCh <-1
 					return
 				}
