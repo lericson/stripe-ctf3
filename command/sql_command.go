@@ -39,10 +39,12 @@ func (c *SQLCommand) Apply(server raft.Server) (interface{}, error) {
 	out, err := sqlDb.Execute(c.Query)
 	sqlDb.Commit()
 	sqlDb.QueryCache[c.TxId] = out
+
 	log.Printf("marikan Applied SQL %s: %s", c.TxId, out)
 	if err != nil {
 		log.Printf("Error applying SQL!")
 	}
+
 	result := sql.Result{
 		Output: out,
 		Error:  err,

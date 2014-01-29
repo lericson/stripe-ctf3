@@ -226,8 +226,7 @@ func (s *Server) sqlHandler(w http.ResponseWriter, req *http.Request) {
 	if state == raft.Follower {
 		ch := make(chan sql.Result)
 		//s.sql.ResultChannels[txId] = ch
-		s.sql.ResultChannels[txId] = ch
-		defer func() { delete(s.sql.ResultChannels, txId); }()
+		//defer func() { delete(s.sql.ResultChannels, txId); }()
 		log.Printf("%s Expect follower proxy SequenceNumber", txId)
 		t := rand.Int()&0xffff
 		errCh := make(chan int)
@@ -280,14 +279,11 @@ postLoop:
 					return
 				}
 
-				// Behavior is weird: shold really only get a response if 
-				// we already applied the query.
 				log.Printf("marikan Successfully posted %s: %s", txId, string(body))
-				//delete(s.sql.ResultChannels, txId)
-				//ch <- sql.Result{
-				//	Output: body,
-				//	Error:  nil,
-				//}
+				ch <- sql.Result{
+					Output: body,
+					Error:  nil,
+				}
 			}()
 			log.Printf("marikan Waiting for results on %s", txId)
 			select {
