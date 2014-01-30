@@ -228,28 +228,27 @@ postLoop:
 				var connString string
 				log.Debugf("Proxy request goroutine %04x#%d started", t, i)
 				leaderName := s.raftServer.Leader()
-				for connString == "" {
-					switch {
-					case leaderName == s.raftServer.Name():
-						connString = s.connectionString()
-						break
-					case leaderName == "":
-						break
-					default:
-						peers := s.raftServer.Peers()
-						peer := peers[leaderName]
-						if peer == nil {
-							log.Printf("Leader %v does not exist in peers map", leaderName)
-							errCh <-1
-							return
-						}
-						connString = peer.ConnectionString
-						break
+				switch {
+				case leaderName == s.raftServer.Name():
+					connString = s.connectionString()
+					break
+				case leaderName == "":
+					break
+				default:
+					peers := s.raftServer.Peers()
+					peer := peers[leaderName]
+					if peer == nil {
+						log.Printf("Leader %v does not exist in peers map", leaderName)
+						errCh <-1
+						return
 					}
-					if connString == "" {
-						log.Printf("Waiting for raft to elect a new leader %04x#%d", t, i)
-						leaderName = <-s.leaderCh
-					}
+					connString = peer.ConnectionString
+					break
+				}
+				if connString == "" {
+					log.Printf("Leader connString indeterminate")
+					errCh <-1
+					return
 				}
 
 				var body []byte
